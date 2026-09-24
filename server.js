@@ -1,251 +1,114 @@
 const express = require("express");
 const dotenv = require("dotenv");
-const crypto = require("crypto");
+const connectDB = require("./db");
+const Task = require("./models/Task");
 
+// Load environment variables
 dotenv.config();
 
+// Connect to MongoDB Database
+connectDB();
+
 const app = express();
-const PORT = 5000;
+const PORT = process.env.PORT || 5000;
 
+// Middleware to parse JSON
 app.use(express.json());
-
-// In-memory data store for tasks
-let tasks = [];
 
 // Request logger
 app.use((req, res, next) => {
-    console.log(`${req.method} ${req.originalUrl}`);
-    next();
+  console.log(`${req.method} ${req.originalUrl}`);
+  next();
 });
 
+// ==========================================
+// ROUTES
+// ==========================================
+
+// Welcome / Health check route
 app.get("/", (req, res) => {
-  res.send("Server is running successfully 🚀");
+  res.send("Server & MongoDB are running successfully 🚀");
 });
 
-
-// ==========================================
-// GET ALL TASKS
-// ==========================================
-
-app.get("/tasks", (req, res) => {
+// 1. GET ALL TASKS
+app.get("/tasks", async (req, res) => {
   try {
-    // check if tasks exists
-    if (!tasks || !Array.isArray(tasks)) {
-      return res.status(200).json([]);
-    }
-
-    const sortedTasks = [...tasks].sort(
-      (a, b) => new Date(b.createdAt) - new Date(a.createdAt)
-    );
-
-    res.status(200).json(sortedTasks);
-
+    const tasks = await Task.find().sort({ createdAt: -1 });
+    res.status(200).json(tasks);
   } catch (err) {
-    res.status(500).json({
-      error: "Internal Server Error",
-      message: err.message
-    });
+    res.status(500).json({ error: "Failed to fetch tasks", message: err.message });
   }
 });
 
-
-// ==========================================
-// GET SINGLE TASK
-// ==========================================
-
-app.get("/tasks/:id", (req, res) => {
-    try {
-        const task = tasks.find((t) => t.id === req.params.id);
-
-        if (!task) {
-            return res.status(404).json({
-                error: "Task Not Found",
-                message: "No task exists with the provided ID"
-            });
-        }
-
-        res.status(200).json(task);
-    } catch (err) {
-        res.status(500).json({
-            error: "Internal Server Error",
-            message: "Something went wrong on the server"
-        });
+// 2. GET A SINGLE TASK BY ID
+app.get("/tasks/:id", async (req, res) => {
+  try {
+    const task = await Task.findById(req.params.id);
+    if (!task) {
+      return res.status(404).json({ error: "Task Not Found" });
     }
+    res.status(200).json(task);
+  } catch (err) {
+    res.status(400).json({ error: "Invalid Task ID or Server Error", message: err.message });
+  }
 });
 
-
-// ==========================================
-// CREATE TASK
-// ==========================================
-
-app.post("/tasks", (req, res) => {
-    try {
-        const { title, description, completed, priority } = req.body;
-
-        // Title validation
-        if (!title || typeof title !== "string" || !title.trim()) {
-            return res.status(400).json({
-                error: "Validation Error",
-                errors: [
-                    {
-                        field: "title",
-                        message: "Title is required"
-                    }
-                ]
-            });
-        }
-
-        // Priority validation
-        const validPriorities = ["low", "medium", "high"];
-        if (priority && !validPriorities.includes(priority)) {
-            return res.status(400).json({
-                error: "Validation Error",
-                errors: [
-                    {
-                        field: "priority",
-                        message: "Priority must be low, medium, or high"
-                    }
-                ]
-            });
-        }
-
-        const newTask = {
-            id: crypto.randomUUID(),
-            title: title.trim(),
-            description: description || "",
-            completed: typeof completed === "boolean" ? completed : false,
-            priority: priority || "medium",
-            createdAt: new Date().toISOString()
-        };
-
-        tasks.push(newTask);
-
-        res.status(201).json(newTask);
-    } catch (err) {
-        res.status(500).json({
-            error: "Internal Server Error",
-            message: "Something went wrong on the server"
-        });
-    }
-});
-
-
-// ==========================================
-// UPDATE TASK
-// ==========================================
-
-app.put("/tasks/:id", (req, res) => {
-    try {
-        const task = tasks.find((t) => t.id === req.params.id);
-
-        if (!task) {
-            return res.status(404).json({
-                error: "Task Not Found",
-                message: "No task exists with the provided ID"
-            });
-        }
-
-        const { title, description, completed, priority } = req.body;
-
-        // Title validation if provided
-        if (title !== undefined) {
-            if (typeof title !== "string" || !title.trim()) {
-                return res.status(400).json({
-                    error: "Validation Error",
-                    errors: [
-                        {
-                            field: "title",
-                            message: "Title cannot be empty"
-                        }
-                    ]
-                });
-            }
-            task.title = title.trim();
-        }
-
-        // Priority validation if provided
-        if (priority !== undefined) {
-            const validPriorities = ["low", "medium", "high"];
-            if (!validPriorities.includes(priority)) {
-                return res.status(400).json({
-                    error: "Validation Error",
-                    errors: [
-                        {
-                            field: "priority",
-                            message: "Priority must be low, medium, or high"
-                        }
-                    ]
-                });
-            }
-            task.priority = priority;
-        }
-
-        if (description !== undefined) {
-            task.description = description;
-        }
-
-        if (completed !== undefined) {
-            task.completed = Boolean(completed);
-        }
-
-        res.status(200).json(task);
-    } catch (err) {
-        res.status(500).json({
-            error: "Internal Server Error",
-            message: "Something went wrong on the server"
-        });
-    }
-});
-
-
-// ==========================================
-// DELETE TASK
-// ==========================================
-
-app.delete("/tasks/:id", (req, res) => {
-    try {
-        const index = tasks.findIndex((t) => t.id === req.params.id);
-
-        if (index === -1) {
-            return res.status(404).json({
-                error: "Task Not Found",
-                message: "No task exists with the provided ID"
-            });
-        }
-
-        const [deletedTask] = tasks.splice(index, 1);
-
-        res.status(200).json({
-            message: "Task Deleted Successfully",
-            deletedTask: deletedTask
-        });
-    } catch (err) {
-        res.status(500).json({
-            error: "Internal Server Error",
-            message: "Something went wrong on the server"
-        });
-    }
-});
-
-
-// ==========================================
-// GLOBAL ERROR HANDLER
-// ==========================================
-
-app.use((err, req, res, next) => {
-    console.error(err.message);
-
-    res.status(500).json({
-        error: "Internal Server Error",
-        message: "Something went wrong on the server"
+// 3. CREATE A NEW TASK
+app.post("/tasks", async (req, res) => {
+  try {
+    const { title, description, completed, priority } = req.body;
+    const newTask = await Task.create({
+      title,
+      description,
+      completed,
+      priority,
     });
+    res.status(201).json(newTask);
+  } catch (err) {
+    res.status(400).json({ error: "Validation Error", message: err.message });
+  }
 });
 
+// 4. UPDATE A TASK BY ID
+app.put("/tasks/:id", async (req, res) => {
+  try {
+    const updatedTask = await Task.findByIdAndUpdate(
+      req.params.id,
+      req.body,
+      { new: true, runValidators: true }
+    );
+
+    if (!updatedTask) {
+      return res.status(404).json({ error: "Task Not Found" });
+    }
+
+    res.status(200).json(updatedTask);
+  } catch (err) {
+    res.status(400).json({ error: "Failed to update task", message: err.message });
+  }
+});
+
+// 5. DELETE A TASK BY ID
+app.delete("/tasks/:id", async (req, res) => {
+  try {
+    const deletedTask = await Task.findByIdAndDelete(req.params.id);
+
+    if (!deletedTask) {
+      return res.status(404).json({ error: "Task Not Found" });
+    }
+
+    res.status(200).json({
+      message: "Task Deleted Successfully",
+      deletedTask,
+    });
+  } catch (err) {
+    res.status(400).json({ error: "Failed to delete task", message: err.message });
+  }
+});
 
 // ==========================================
 // START SERVER
 // ==========================================
-
 app.listen(PORT, () => {
-    console.log(`Server Running on Port ${PORT}`);
+  console.log(`Server running at http://localhost:${PORT}`);
 });
